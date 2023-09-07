@@ -14,6 +14,7 @@ modules:
       SPRING_PROFILES_ACTIVE: cloud,sandbox
       JBP_CONFIG_COMPONENTS: "jres: ['com.sap.xs.java.buildpack.jre.SAPMachineJRE']"
       JBP_CONFIG_SAP_MACHINE_JRE: '{ use_offline_repository: false, version: 17.+ }'
+      CDS_MULTITENANCY_APPUI_TENANTSEPARATOR: "-"
     build-parameters:
       builder: custom
       commands:
@@ -28,6 +29,12 @@ modules:
         properties:
           CDS_MULTITENANCY_APPUI_URL: ~{url}
       - name: products-service-auth
+      - name: mtx-api
+        properties:
+          CDS_MULTITENANCY_MTXS_ENABLED: true
+          CDS_MULTITENANCY_SIDECAR_URL: ~{mtx-url}
+      - name: products-service-registry
+      - name: products-service-db
 
   - name: products-service
     type: approuter.nodejs
@@ -44,10 +51,38 @@ modules:
           url: ~{srv-url}
           forwardAuthToken: true
       - name: products-service-auth
+      - name: mtx-api
+        group: destinations
+        properties:
+          name: mtx-api # must be used in xs-app.json as well
+          url: ~{mtx-url}
     provides:
       - name: app-api
         properties:
           url: ${default-url}
+    properties:
+      TENANT_HOST_PATTERN: "^(.*)-${default-uri}"
+
+  - name: products-service-mtx
+    type: nodejs
+    path: mtx/sidecar
+    build-parameters:
+      builder: custom
+      build-result: gen
+      commands:
+        - npm run build
+      requires:
+        - name: products-service-srv
+    parameters:
+      memory: 256M
+      disk-quota: 512M
+    provides:
+      - name: mtx-api
+        properties:
+          mtx-url: ${default-url}
+    requires:
+      - name: products-service-auth
+      - name: products-service-db
 
 resources:
   - name: products-service-auth
@@ -58,4 +93,32 @@ resources:
       path: ./xs-security.json
       config:
         xsappname: products-service-${org}-${space}
-        tenant-mode: dedicated
+        tenant-mode: shared
+        oauth2-configuration:
+          redirect-uris:
+            - https://*.~{approuter-app-api/domain}/**
+  - name: products-service-registry
+    type: org.cloudfoundry.managed-service
+    requires:
+      - name: srv-api
+    parameters:
+      service: saas-registry
+      service-plan: application
+      config:
+        xsappname: products-service-${org}-${space}
+        appName: products-service-${org}-${space}
+        displayName: products-service
+        description: A simple CAP project.
+        category: 'Category'
+        appUrls:
+          getDependencies: ~{srv-api/srv-url}/mt/v1.0/subscriptions/dependencies
+          onSubscription: ~{srv-api/srv-url}/mt/v1.0/subscriptions/tenants/{tenantId}
+          onSubscriptionAsync: true
+          onUnSubscriptionAsync: true
+          onUpdateDependenciesAsync: true
+          callbackTimeoutMillis: 300000 # Increase if your deployments are taking longer than that
+  - name: products-service-db
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: service-manager
+      service-plan: container

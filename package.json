@@ -6,5 +6,8 @@
   "repository": "<Add your repository here>",
   "devDependencies": {
     "@sap/cds-dk": "^7"
-  }
+  },
+  "workspaces": [
+    "mtx/sidecar"
+  ]
 }
