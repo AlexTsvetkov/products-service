@@ -1,5 +1,8 @@
 {
     "build": {
         "target": "."
+    },
+    "requires": {
+        "auth": "xsuaa"
     }
 }
